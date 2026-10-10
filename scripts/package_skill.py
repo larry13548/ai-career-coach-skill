@@ -6,7 +6,7 @@ from pathlib import Path
 import zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
-VERSION='0.1.0'
+VERSION='1.1.0'
 
 def package():
     names=['SKILL.md','README.md','requirements.txt','scripts/score_match.py','scripts/resume_docx.py']
