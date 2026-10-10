@@ -5,8 +5,10 @@ import hashlib
 import json
 import sys
 from decimal import Decimal, ROUND_HALF_UP
+from fractions import Fraction
 
-POINTS = {'matched': 2, 'partial': 1, 'unknown': 0, 'unmatched': 0}
+POINTS = {'matched': Fraction(1), 'transferable': Fraction(3,4), 'partial': Fraction(1,2), 'unknown': Fraction(0), 'unmatched': Fraction(0)}
+WEIGHTS = {'experience': 60, 'capability': 30, 'tenure': 10}
 
 
 def validate(data):
@@ -25,6 +27,16 @@ def validate(data):
         if row['id'] in ids:
             raise ValueError('duplicate requirement id')
         ids.add(row['id'])
+        if row.get('dimension') not in WEIGHTS:
+            raise ValueError('dimension must be experience, capability or tenure; old equal-weight inputs must be revised')
+        if row['dimension']=='tenure':
+            if type(row.get('required_months')) is not int or row['required_months']<=0:
+                raise ValueError('required_months must be a positive integer')
+            if row.get('status')!='unknown':
+                if type(row.get('actual_months')) is not int or row['actual_months']<0:
+                    raise ValueError('actual_months must be a nonnegative integer')
+                expected='matched' if row['actual_months']>=row['required_months'] else 'unmatched' if row['actual_months']==0 else 'partial'
+                if row.get('status')!=expected: raise ValueError('tenure status contradicts months')
         if row.get('kind') not in ('required', 'bonus') or row.get('status') not in POINTS:
             raise ValueError('invalid kind or status')
         if type(row.get('hard_gate')) is not bool:
@@ -41,9 +53,9 @@ def validate(data):
 
 def manifest(data):
     validate(data)
-    keys = ('id', 'requirement', 'jd_quote', 'category', 'kind', 'hard_gate')
+    keys = ('id', 'requirement', 'jd_quote', 'category', 'dimension', 'kind', 'hard_gate', 'required_months')
     return {'job': data['job'], 'requirements': sorted(
-        [{k: row[k] for k in keys} for row in data['requirements']], key=lambda r: r['id'])}
+        [{k: row.get(k) for k in keys} for row in data['requirements']], key=lambda r: r['id'])}
 
 
 def score(data, baseline=None):
@@ -53,13 +65,24 @@ def score(data, baseline=None):
         raise ValueError('requirements changed: explain the JD correction and start an explicitly revised baseline')
     required = [r for r in rows if r['kind'] == 'required']
     bonus = [r for r in rows if r['kind'] == 'bonus']
-    units = sum(POINTS[r['status']] for r in required)
     n = len(required)
+    def credit(row):
+        if row['status']=='unknown': return Fraction(0)
+        if row['dimension']=='tenure': return min(Fraction(row['actual_months'],row['required_months']),Fraction(1))
+        return POINTS[row['status']]
+    active=[d for d in WEIGHTS if any(r['dimension']==d for r in required)]
+    denominator=sum(WEIGHTS[d] for d in active)
+    total=Fraction(0); dimensions={}
+    for d in WEIGHTS:
+        items=[r for r in required if r['dimension']==d]
+        weight=Fraction(100*WEIGHTS[d],denominator) if items else Fraction(0)
+        earned=weight*sum((credit(r) for r in items),Fraction(0))/len(items) if items else Fraction(0)
+        total+=earned
+        dimensions[d]={'weight':float(weight),'score':float(earned),'items':len(items)}
     unknown = [r['id'] for r in required if r['status'] == 'unknown']
-    hard_gaps = [r['id'] for r in required if r['hard_gate'] and r['status'] in ('partial', 'unmatched')]
+    hard_gaps = [r['id'] for r in required if r['hard_gate'] and r['status'] not in ('matched','unknown')]
     hard_unknown = [r['id'] for r in required if r['hard_gate'] and r['status'] == 'unknown']
-    # Compare integer half-point units, never the rounded display value.
-    branch = 'no_requirements' if not n else ('above_90' if units * 5 > n * 9 else 'at_90' if units * 5 == n * 9 else 'below_90')
+    branch = 'no_requirements' if not n else 'above_90' if total>90 else 'at_90' if total==90 else 'below_90'
     messages = {
         'no_requirements': '没有可识别的常规或必备要求，请补充JD，不生成分数。',
         'above_90': '材料基本匹配，建议投递尝试，并说明剩余缺口。',
@@ -73,9 +96,10 @@ def score(data, baseline=None):
         advice = '有硬性条件尚待确认，应优先澄清；当前匹配度为暂评。'
     if n and unknown:
         advice += ' 信息缺失暂计0分，不等于候选人不具备能力。'
-    percent = ((Decimal(units) * 50 / Decimal(n)).quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)) if n else None
+    percent = ((Decimal(total.numerator)/Decimal(total.denominator)).quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)) if n else None
     return {
-        'job': data['job'], 'score': units / 2, 'total': n,
+        'job': data['job'], 'score': float(total) if n else None, 'total': 100 if n else 0, 'requirement_count': n,
+        'dimensions': dimensions, 'weight_redistributed': bool(n) and len(active)<3,
         'percentage': str(percent) if percent is not None else None,
         'threshold_branch': branch, 'provisional': bool(unknown),
         'unknown_ids': unknown,
