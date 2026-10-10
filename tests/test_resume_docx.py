@@ -37,14 +37,18 @@ class ResumeTests(unittest.TestCase):
                     self.assertEqual(spacing.get(qn('w:after')),'180')
             with self.assertRaises(ValueError):build(self.data,f,layout)
 
-    def test_requires_confirmed_text(self):
+    def test_unconfirmed_draft_and_missing_identity_do_not_block(self):
         d=copy.deepcopy(self.data);d['confirmed']=False
-        with self.assertRaises(ValueError):build(d,self.dir/'no.docx','single-column')
+        d.pop('name');d['contact']=[]
+        f=self.dir/'draft.docx';build(d,f,'single-column')
+        text='\n'.join(p['text'] for p in inspect(f))
+        for value in ('待补充','手机：待补充','邮箱：待补充','照片：待上传'):self.assertIn(value,text)
+        self.assertIn(d['sections'][0]['title'],text)
 
     def test_patch_preserves_unedited_content_and_refuses_stale_text(self):
         src=self.dir/'source.docx';build(self.data,src,'single-column')
         rows=inspect(src);index=next(x['index'] for x in rows if x['text']==self.data['name'])
-        edits={'confirmed':True,'edits':[{'index':index,'expected':self.data['name'],'replacement':'合成候选人乙'}]}
+        edits={'edits':[{'index':index,'expected':self.data['name'],'replacement':'合成候选人乙'}]}
         dest=self.dir/'patched.docx';patch(src,edits,dest)
         after=inspect(dest)
         for before,a in zip(rows,after):self.assertEqual(a['text'],'合成候选人乙' if before['index']==index else before['text'])

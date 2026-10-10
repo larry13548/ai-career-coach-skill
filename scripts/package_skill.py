@@ -6,11 +6,11 @@ from pathlib import Path
 import zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
-VERSION='1.1.0'
+VERSION='1.2.0'
 
 def package():
     names=['SKILL.md','README.md','requirements.txt','scripts/score_match.py','scripts/resume_docx.py']
-    names += [str(p.relative_to(ROOT)) for folder in ('references','assets') for p in sorted((ROOT/folder).iterdir()) if p.is_file() and p.suffix in ('.md','.docx')]
+    names += [str(p.relative_to(ROOT)) for folder in ('references','assets') for p in sorted((ROOT/folder).rglob('*')) if p.is_file() and p.suffix in ('.md','.docx','.png')]
     for name in names:
         p=ROOT/name
         if p.is_symlink() or not p.is_file():raise ValueError(f'Invalid resource: {name}')

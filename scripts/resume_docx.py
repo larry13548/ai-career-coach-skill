@@ -175,14 +175,14 @@ def background_images(doc, artworks):
 
 
 def validate_resume(data):
-    if not isinstance(data, dict) or data.get('confirmed') is not True:
-        raise ValueError('confirmed must be true only after user approval of the full text')
+    if not isinstance(data, dict):
+        raise ValueError('resume must be an object')
     string(data.get('name'), 'name'); string(data.get('target'), 'target')
     if 'photo' in data: string(data['photo'],'photo')
     if not isinstance(data.get('contact'), list): raise ValueError('contact must be a list')
     for t in data['contact']: string(t, 'contact item')
-    if not isinstance(data.get('sections'), list) or not data['sections']:
-        raise ValueError('sections must contain the approved content')
+    if not isinstance(data.get('sections'), list):
+        raise ValueError('sections must be a list')
     for sec in data['sections']:
         string(sec.get('title'),'section title')
         if 'icon' in sec: string(sec['icon'],'section icon')
@@ -215,6 +215,18 @@ def validate_resume(data):
 
 
 def build(data, output, layout):
+    if not isinstance(data,dict): raise ValueError('resume must be an object')
+    data=copy.deepcopy(data)
+    for key in ('name','target'):
+        if data.get(key) in (None,''): data[key]='待补充'
+    if data.get('photo') in (None,''): data.pop('photo',None)
+    data.setdefault('contact',[]); data.setdefault('sections',[])
+    if isinstance(data['contact'],list):
+        import re
+        contact_text=' '.join(str(x) for x in data['contact'])
+        if not re.search(r'手机|电话|[+\d][\d ()-]{6,}',contact_text): data['contact'].append('手机：待补充')
+        if not re.search(r'邮箱|邮件|@',contact_text): data['contact'].append('邮箱：待补充')
+        if not data.get('photo'): data['contact'].append('照片：待上传')
     validate_resume(data)
     doc=Document(ROOT/'assets'/f'resume-{layout}.docx')
     for child in list(doc._element.body):
@@ -228,7 +240,7 @@ def build(data, output, layout):
     if layout == 'sidebar':
         side=[s for s in data['sections'] if s.get('column')=='sidebar']
         main=[s for s in data['sections'] if s.get('column')!='sidebar']
-        if not side or not main: raise ValueError('sidebar layout needs both sidebar and main sections')
+        # Missing sections are allowed; do not block draft delivery.
         table=doc.add_table(rows=1,cols=2); table.autofit=False
         for cell, col, width in zip(table.rows[0].cells, table.columns, [5.1,12.1]):
             col.width=Cm(width);cell.width=Cm(width);prep_cell(cell)
@@ -259,8 +271,8 @@ def inspect(path):
 
 def patch(source, edits, output):
     if Path(source).resolve()==Path(output).resolve(): raise ValueError('preserve the original; choose a different output')
-    if not isinstance(edits,dict) or edits.get('confirmed') is not True or not isinstance(edits.get('edits'),list):
-        raise ValueError('edits need confirmed:true and edits list')
+    if not isinstance(edits,dict) or not isinstance(edits.get('edits'),list):
+        raise ValueError('edits need an edits list')
     doc=Document(source);paras=body_paragraphs(doc);seen=set()
     for change in edits['edits']:
         i=change.get('index')
